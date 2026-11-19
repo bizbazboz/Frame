@@ -1,0 +1,8 @@
+{% from 'icons.html' import icon %}
+{% macro file_field(id, name='files', folder=false, multiple=true, required=false) %}
+<div class="custom-upload" data-upload-control>
+  <div class="upload-field-heading"><span class="upload-field-icon">{{ icon('folder' if folder else 'image',24) }}</span><div><strong>{{ 'Import a folder' if folder else ('Choose images' if multiple else 'Choose an image') }}</strong></div></div>
+  <div class="upload-field-actions"><label class="file-trigger" for="{{ id }}"><span>{{ icon('folder' if folder else 'plus',18) }} {{ 'Browse folders' if folder else 'Browse files' }}</span><input id="{{ id }}" class="custom-file-input" type="file" name="{{ name }}" {% if folder %}webkitdirectory{% else %}accept="image/jpeg,image/png,image/gif,image/webp,image/avif"{% endif %} {% if multiple %}multiple{% endif %} {% if required %}required{% endif %} data-file-picker aria-describedby="{{ id }}-selection"></label><button type="button" class="quiet upload-clear" data-upload-clear hidden>Clear selection</button></div>
+  <div class="upload-selection" id="{{ id }}-selection" role="status" aria-live="polite" data-upload-selection>{{ 'No folder selected' if folder else 'No files selected' }}</div>
+</div>
+{% endmacro %}

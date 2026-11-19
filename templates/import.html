@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Import photos · Frame{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>Import photos</h1></div><a class="button secondary" href="{{ url_for('gallery',state='pool') }}">View Pool {{ icon('arrow',16) }}</a></div>
+<form method="post" enctype="multipart/form-data" class="import-shell" data-import-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="file" name="files" multiple hidden disabled data-import-payload>
+  <div class="import-workspace">
+    <section class="import-source-pane">
+      <div class="import-droparea" data-import-dropzone role="group" aria-label="Photo upload">
+        <div class="import-drop-symbol" aria-hidden="true">{{ icon('image',30) }}</div>
+        <h2>Drop photos here</h2>
+        <div class="import-browse-actions">
+          <label class="import-browse import-browse-primary"><span>{{ icon('plus',16) }} Choose photos</span><input type="file" name="files" multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif" aria-label="Choose photos" data-import-photos></label>
+          <label class="import-browse"><span>{{ icon('folder',16) }} Choose folder</span><input type="file" name="files" webkitdirectory multiple aria-label="Choose folder" data-import-folder></label>
+        </div>
+        <span class="import-file-formats">JPG · PNG · GIF · WebP · AVIF</span>
+      </div>
+    </section>
+    <section class="import-selection-pane" aria-label="Selected photos">
+      <div class="import-selection-heading"><h2>Selection</h2><button type="button" class="quiet" data-import-clear disabled>Clear all</button></div>
+      <div class="import-empty-selection" data-import-empty>{{ icon('image',26) }}<span>No photos selected</span></div>
+      <ul class="import-file-list" data-import-list aria-label="Files selected for import" hidden></ul>
+      <span class="import-preview-count" data-import-preview-count hidden></span>
+    </section>
+  </div>
+  <div class="import-feedback" role="status" aria-live="polite" data-import-feedback hidden></div>
+  <div class="import-bottom-bar"><div class="import-totals"><strong data-import-total role="status" aria-live="polite">0 files</strong><span>512 MB maximum</span></div><button type="submit" data-import-submit>{{ icon('plus',18) }} Import into Pool</button></div>
+</form>
+<template id="import-file-template"><li class="import-file-row"><span class="import-file-preview">{{ icon('image',20) }}<img width="44" height="44" alt="" loading="lazy"></span><div class="import-file-name"><strong></strong><span></span></div><button type="button" class="quiet icon-button">{{ icon('close',16) }}</button></li></template>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static',filename='import.js') }}" defer></script>{% endblock %}

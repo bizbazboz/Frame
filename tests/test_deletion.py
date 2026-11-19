@@ -48,7 +48,7 @@ def test_version_delete_and_protections(client, app):
     assert post(client, '/group/1/version/2/delete').status_code == 400
     assert client.get('/group/2/version/2/delete').status_code == 404
     result = post(client, '/group/1/version/2/delete', confirm='delete')
-    assert result.location.endswith('/group/1')
+    assert result.location.split('?')[0].endswith('/group/1')
     assert not edit_path.exists() and original_path.exists()
     with app.app_context():
         assert db.session.get(PhotoVersion, 2) is None
@@ -78,7 +78,7 @@ def test_group_deletes_campaigns_files_but_preserves_shared_tags(client, app):
     assert image_path.exists()
     assert post(client, '/group/1/delete').status_code == 400
     result = post(client, '/group/1/delete', confirm='delete')
-    assert result.location.endswith('/gallery/pool')
+    assert result.location.split('?')[0].endswith('/gallery/pool')
     assert not image_path.exists() and keep_path.exists() and untracked.exists()
     with app.app_context():
         assert db.session.get(PhotoGroup, 1) is None
@@ -108,9 +108,9 @@ def test_review_delete_confirmation_then_advance(client, app):
     with app.app_context():
         assert PhotoGroup.query.count() == 2
     result = post(client, '/group/1/delete', confirm='delete', origin='review')
-    assert result.location.endswith('/pool/review/2')
+    assert result.location.split('?')[0].endswith('/pool/review/2')
     result = post(client, '/group/2/delete', confirm='delete', origin='review')
-    assert result.location.endswith('/pool/review')
+    assert result.location.split('?')[0].endswith('/pool/review')
     assert b'Pool is empty' in client.get(result.location).data
 
 

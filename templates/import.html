@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-heading"><div><h1>Import photos</h1></div><a class="button secondary" href="{{ url_for('gallery',state='pool') }}">View Pool {{ icon('arrow',16) }}</a></div>
 <form method="post" enctype="multipart/form-data" class="import-shell" data-import-form>
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if current_project %}<input type="hidden" name="project_context" value="{{ current_project.id }}">{% endif %}
   <input type="file" name="files" multiple hidden disabled data-import-payload>
   <div class="import-workspace">
     <section class="import-source-pane">

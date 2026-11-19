@@ -38,7 +38,7 @@ def test_duplicates_in_batch_and_renamed_reuploads(client, app):
 def test_duplicates_across_groups_versions_and_existing_database(client, app):
     # Simulate an existing library without a hash column or sidecar index.
     with app.app_context():
-        group = PhotoGroup(state='never_post')
+        group = PhotoGroup(state='never_post', project_id=1)
         db.session.add(group)
         db.session.flush()
         root = Path(app.config['MEDIA_ROOT'])

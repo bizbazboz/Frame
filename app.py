@@ -20,13 +20,23 @@ from filelock import FileLock
 from image_analysis import inspect_image
 from media_deletion import delete_with_media, MediaDeletionError
 from database_setup import register_database_commands
+from projects import register_projects
 
 load_dotenv()
 db = SQLAlchemy()
 group_tags = db.Table('group_tags', db.Column('group_id', db.ForeignKey('photo_group.id'), primary_key=True), db.Column('tag_id', db.ForeignKey('tag.id'), primary_key=True))
 
+class Project(db.Model):
+    __table_args__ = {'sqlite_autoincrement': True}
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class PhotoGroup(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id', name='fk_photo_group_project_id_project'), nullable=False, index=True)
+    project = db.relationship('Project', backref='photos')
     state = db.Column(db.String(20), nullable=False, default='pool')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     versions = db.relationship('PhotoVersion', backref='group', cascade='all, delete-orphan', order_by='PhotoVersion.created_at')
@@ -148,6 +158,14 @@ def create_app(config=None):
         db.session.commit()
         g.upload_paths = []
 
+    register_projects(app, db, Project, PhotoGroup)
+
+    def project_photos():
+        return PhotoGroup.query.filter_by(project_id=g.project.id)
+
+    def project_photo(id):
+        return project_photos().filter_by(id=id).first_or_404()
+
     @app.after_request
     def private_cache_policy(response):
         if request.endpoint not in ('static', 'manifest', 'service_worker'):
@@ -217,7 +235,7 @@ def create_app(config=None):
 
     @app.get('/')
     def dashboard():
-        return render_template('dashboard.html', counts={s: PhotoGroup.query.filter_by(state=s).count() for s in STATES}, recent=PhotoGroup.query.order_by(PhotoGroup.created_at.desc(), PhotoGroup.id.desc()).limit(5).all(), planned=CampaignDestination.query.filter_by(status='planned').count())
+        return render_template('dashboard.html', counts={s: project_photos().filter_by(state=s).count() for s in STATES}, recent=project_photos().order_by(PhotoGroup.created_at.desc(), PhotoGroup.id.desc()).limit(5).all(), planned=CampaignDestination.query.join(Campaign).join(PhotoGroup).filter(PhotoGroup.project_id == g.project.id, CampaignDestination.status == 'planned').count())
 
     def store(file, group, label):
         filename = secure_filename(file.filename or '')
@@ -231,23 +249,23 @@ def create_app(config=None):
             return result.digest()
 
         if not hasattr(g, 'library_hashes'):
-            g.library_hashes = set()
+            g.library_hashes = {}
             for version in PhotoVersion.query.all():
                 existing = Path(app.config['MEDIA_ROOT']) / version.stored_path
                 if existing.is_file():
                     with existing.open('rb') as source:
-                        g.library_hashes.add(digest(source))
+                        g.library_hashes[digest(source)] = version.group.project.name
         file.stream.seek(0)
         fingerprint = digest(file.stream)
         file.stream.seek(0)
         if fingerprint in g.library_hashes:
-            raise ValueError('Duplicate skipped: this image already exists in the library.')
+            raise ValueError(f'Duplicate skipped: this image already exists in project "{g.library_hashes[fingerprint]}".')
         folder = Path(app.config['MEDIA_ROOT']) / str(group.id)
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / (uuid.uuid4().hex + Path(filename).suffix.lower())
         g.upload_paths.append(path)
         file.save(path)
-        g.library_hashes.add(fingerprint)
+        g.library_hashes[fingerprint] = group.project.name
         db.session.add(PhotoVersion(group=group, label=label or 'Original', original_filename=file.filename, stored_path=f'{group.id}/{path.name}'))
 
     @app.route('/import', methods=['GET', 'POST'])
@@ -259,7 +277,7 @@ def create_app(config=None):
                 imported = 0
                 for f in files:
                     try:
-                        group = PhotoGroup(state='pool'); db.session.add(group); db.session.flush()
+                        group = PhotoGroup(state='pool', project=g.project); db.session.add(group); db.session.flush()
                         store(f, group, 'Original')
                         imported += 1
                     except ValueError as e:
@@ -269,12 +287,14 @@ def create_app(config=None):
         return render_template('import.html')
 
     @app.get('/media/<path:path>')
-    def media(path): return send_from_directory(app.config['MEDIA_ROOT'], path)
+    def media(path):
+        PhotoVersion.query.join(PhotoGroup).filter(PhotoVersion.stored_path == path, PhotoGroup.project_id == g.project.id).first_or_404()
+        return send_from_directory(app.config['MEDIA_ROOT'], path)
 
     @app.get('/gallery/<state>')
     def gallery(state):
         if state not in (*STATES, 'all'): abort(404)
-        q = PhotoGroup.query
+        q = project_photos()
         if state != 'all': q = q.filter_by(state=state)
         search = request.args.get('q', '').strip()
         if search:
@@ -304,7 +324,7 @@ def create_app(config=None):
                     dq = dq.filter(CampaignDestination.published_at < datetime.fromisoformat(end) + timedelta(days=1))
             except ValueError: abort(400, 'Invalid date')
             q = q.filter(dq.exists())
-        return render_template('gallery.html', state=state, tag_groups=TagGroup.query.order_by(TagGroup.name).all(), photos=q.order_by(PhotoGroup.created_at.asc() if request.args.get('sort') == 'oldest' else PhotoGroup.created_at.desc()).all(), tags=Tag.query.order_by(Tag.name).all(), platforms=Platform.query.order_by(Platform.name).all(), accounts=SocialAccount.query.order_by(SocialAccount.display_name).all())
+        return render_template('gallery.html', state=state, has_filters=any(value for key in ('q', 'tag', 'tag_group', 'platform', 'account', 'status', 'start', 'end') for value in request.args.getlist(key)), tag_groups=TagGroup.query.order_by(TagGroup.name).all(), photos=q.order_by(PhotoGroup.created_at.asc() if request.args.get('sort') == 'oldest' else PhotoGroup.created_at.desc()).all(), tags=Tag.query.order_by(Tag.name).all(), platforms=Platform.query.order_by(Platform.name).all(), accounts=SocialAccount.query.order_by(SocialAccount.display_name).all())
 
     def apply_group_tags(photo):
         if request.form.get('new_tags', '').strip():
@@ -322,12 +342,12 @@ def create_app(config=None):
     @app.route('/pool/review', defaults={'id': None}, methods=['GET'])
     @app.route('/pool/review/<int:id>', methods=['GET', 'POST'])
     def pool_review(id):
-        queue = PhotoGroup.query.filter_by(state='pool').order_by(PhotoGroup.created_at, PhotoGroup.id).all()
+        queue = project_photos().filter_by(state='pool').order_by(PhotoGroup.created_at, PhotoGroup.id).all()
         if id is None:
             if queue:
                 return redirect(url_for('pool_review', id=queue[0].id))
             return render_template('review.html', photo=None, remaining=0)
-        photo = db.get_or_404(PhotoGroup, id)
+        photo = project_photo(id)
         if photo.state != 'pool':
             abort(409, 'This photo is no longer in Pool.')
         index = next((i for i, item in enumerate(queue) if item.id == photo.id), None)
@@ -345,7 +365,7 @@ def create_app(config=None):
             if action in ('accept', 'deny'):
                 target = 'staging' if action == 'accept' else 'never_post'
                 # Conditional update prevents an old review tab from overwriting another decision.
-                changed = db.session.query(PhotoGroup).filter_by(id=photo.id, state='pool').update({'state': target}, synchronize_session=False)
+                changed = db.session.query(PhotoGroup).filter_by(id=photo.id, project_id=g.project.id, state='pool').update({'state': target}, synchronize_session=False)
                 if changed != 1:
                     db.session.rollback()
                     abort(409, 'This photo is no longer in Pool.')
@@ -373,7 +393,7 @@ def create_app(config=None):
 
     @app.route('/group/<int:id>', methods=['GET', 'POST'])
     def group(id):
-        photo = db.get_or_404(PhotoGroup, id)
+        photo = project_photo(id)
         if request.method == 'POST':
             action = request.form.get('action')
             if action == 'state':
@@ -401,7 +421,7 @@ def create_app(config=None):
             abort(400, 'Invalid photo selection.')
         if not ids or len(ids) > 500:
             abort(400, 'Select between 1 and 500 photo groups.')
-        photos = PhotoGroup.query.filter(PhotoGroup.id.in_(ids)).order_by(PhotoGroup.id).all()
+        photos = project_photos().filter(PhotoGroup.id.in_(ids)).order_by(PhotoGroup.id).all()
         if len(photos) != len(ids):
             abort(409, 'A selected photo group no longer exists.')
         return_state = request.form.get('return_state', 'all')
@@ -425,6 +445,14 @@ def create_app(config=None):
                 abort(409, str(error))
             flash(f'Deleted {len(ids)} photo groups.')
         else:
+            destination = request.form.get('target_project_id', '').strip()
+            destination_project = None
+            if destination:
+                try:
+                    destination_project = db.session.get(Project, int(destination))
+                except ValueError:
+                    abort(400, 'Invalid project.')
+                if not destination_project: abort(400, 'Project no longer exists.')
             target = request.form.get('state', '')
             mode = request.form.get('tag_mode', 'keep')
             if target not in ('', 'pool', 'staging', 'never_post') or mode not in ('keep', 'add', 'remove', 'replace'):
@@ -440,10 +468,12 @@ def create_app(config=None):
                 abort(400, 'A selected tag no longer exists.')
             for photo in photos:
                 if target:
-                    changed = db.session.query(PhotoGroup).filter_by(id=photo.id, state=photo.state).update({'state': target}, synchronize_session=False)
+                    changed = db.session.query(PhotoGroup).filter_by(id=photo.id, project_id=g.project.id, state=photo.state).update({'state': target}, synchronize_session=False)
                     if changed != 1:
                         db.session.rollback()
                         abort(409, 'A selected photo has changed state.')
+                if destination_project:
+                    photo.project = destination_project
                 if mode == 'replace':
                     photo.tags = list(selected)
                 elif mode == 'add':
@@ -460,9 +490,9 @@ def create_app(config=None):
 
     @app.route('/group/<int:id>/delete', methods=['GET', 'POST'])
     def delete_group(id):
-        photo = db.get_or_404(PhotoGroup, id)
+        photo = project_photo(id)
         origin = deletion_origin()
-        queue = PhotoGroup.query.filter_by(state='pool').order_by(PhotoGroup.created_at, PhotoGroup.id).all()
+        queue = project_photos().filter_by(state='pool').order_by(PhotoGroup.created_at, PhotoGroup.id).all()
         index = next((i for i, item in enumerate(queue) if item.id == id), 0)
         others = [item.id for item in queue if item.id != id]
         next_id = others[index % len(others)] if others else None
@@ -482,7 +512,7 @@ def create_app(config=None):
 
     @app.route('/group/<int:group_id>/version/<int:version_id>/delete', methods=['GET', 'POST'])
     def delete_version(group_id, version_id):
-        photo = db.get_or_404(PhotoGroup, group_id)
+        photo = project_photo(group_id)
         version = db.get_or_404(PhotoVersion, version_id)
         if version.group_id != photo.id:
             abort(404)
@@ -506,7 +536,8 @@ def create_app(config=None):
     @app.route('/campaign/edit/<int:campaign_id>', methods=['GET', 'POST'])
     def campaign(group_id=None, campaign_id=None):
         item = db.get_or_404(Campaign, campaign_id) if campaign_id else None
-        photo = item.group if item else db.get_or_404(PhotoGroup, group_id)
+        photo = item.group if item else project_photo(group_id)
+        if photo.project_id != g.project.id: abort(404)
         if not item and photo.state == 'never_post': abort(403, 'Move this group to Pool or Staging before creating a campaign.')
         if request.method == 'POST':
             version = db.session.get(PhotoVersion, request.form.get('version_id', type=int))

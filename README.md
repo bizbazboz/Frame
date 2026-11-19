@@ -23,6 +23,7 @@ A private, self-hosted photo library and social-post tracker. Organise photo gro
 
 - Multi-file and folder imports, managed image versions, and exact-content duplicate prevention.
 - Pool review with metadata, histogram, category tags, and Staging/Never Post decisions.
+- Local projects with a sidebar switcher, separate photo sets and project-aware galleries.
 - Filterable galleries, bulk editing and deletion, and configurable tags and tag groups.
 - Reusable platforms and accounts, campaigns with multiple destinations, and planned/published tracking.
 - Dark interface, authenticated image access, CSRF protection, and local logout.
@@ -34,6 +35,14 @@ A private, self-hosted photo library and social-post tracker. Organise photo gro
 3. Run `docker compose up -d --build` and open port 8000 through your HTTPS reverse proxy.
 
 The database is persisted at `./data/app.db` and images at `./media/`. Back up both. Containers apply Alembic migrations before starting Gunicorn. Existing pre-Alembic libraries must follow the adoption steps below first.
+
+## Projects
+
+Choose a project from the sidebar dropdown. The adjacent **+** opens project management, where you can create or rename projects and delete empty ones. Each project has its own photos, workflow counts, review queue and campaigns. Tags, classifications, platforms and social accounts are shared and reusable across projects. Projects organise one local library; they are not separate user permissions or tenants.
+
+Existing libraries upgrade into **Main library** automatically through migration `0002`; image paths, tags, campaigns and publication history are preserved. To reorganise existing photos, select them in a gallery, open **Bulk edit**, and choose **Move to project**. Versions and campaign records move with their group; files stay in the managed media folder. Duplicate prevention still spans all projects, and duplicate messages name the project containing the image.
+
+Project context is included in links and forms so another tab's project switch cannot redirect an upload or edit into the wrong set. The most recent sidebar selection is remembered in the current login session. A project containing photos and the last remaining project cannot be deleted.
 
 ## Install as an app
 

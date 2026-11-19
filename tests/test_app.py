@@ -31,7 +31,7 @@ def test_schema_restart(tmp_path):
     first = create_app(config)
     with first.app_context():
         upgrade()
-        db.session.add(PhotoGroup(state='pool')); db.session.commit()
+        db.session.add(PhotoGroup(state='pool', project_id=1)); db.session.commit()
     second = create_app(config)
     with second.app_context(): assert PhotoGroup.query.count() == 1
 

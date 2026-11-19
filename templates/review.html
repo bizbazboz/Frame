@@ -2,7 +2,7 @@
 <div class="page-heading review-heading"><div><h1>Pool review</h1></div><div class="heading-actions">{% if photo %}<span class="page-context">{{ position }} / {{ remaining }} in Pool</span>{% endif %}<a class="button secondary" href="{{ url_for('gallery',state='pool') }}">Back to Pool</a></div></div>
 {% if photo %}
 <form method="post" action="{{ url_for('pool_review',id=photo.id) }}" class="review-layout" data-review-form>
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if current_project %}<input type="hidden" name="project_context" value="{{ current_project.id }}">{% endif %}
 <section class="review-main"><div class="review-image-header"><h2 class="filename">{{ photo.versions[0].original_filename if photo.versions else 'Photo group ' ~ photo.id }}</h2><a href="{{ url_for('group',id=photo.id) }}" target="_blank" rel="noopener">Open workspace ↗</a></div>
 <div class="review-image-stage">{% if version %}<img src="{{ url_for('media',path=version.stored_path) }}" alt="{{ version.original_filename }}">{% else %}<span class="muted">No image version</span>{% endif %}</div>
 <div class="review-controls"><div class="review-pagination"><button type="submit" class="secondary previous-photo" name="action" value="previous" aria-label="Previous photo">{{ icon('arrow',18) }}</button><button type="submit" class="secondary" name="action" value="next">Next {{ icon('arrow',18) }}</button></div><div class="review-decisions"><button type="submit" class="review-deny" name="action" value="deny">{{ icon('close',18) }} Deny <span>Never Post</span></button><button type="submit" name="action" value="accept">{{ icon('check',18) }} Accept <span>Staging</span></button></div></div>

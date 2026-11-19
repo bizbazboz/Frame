@@ -24,24 +24,24 @@ def test_review_queue_decisions_tags_and_wraparound(client, app):
     post(client, '/tags', action='save_tag', name='Portrait', tag_group_id='1')
     for name in ('keeper', 'reviewed', 'candidate', 'rejected'):
         post(client, '/tags', action='save_tag', name=name)
-    assert client.get('/pool/review').location.endswith('/pool/review/1')
+    assert client.get('/pool/review').location.split('?')[0].endswith('/pool/review/1')
     assert b'RGB histogram' in client.get('/pool/review/1').data
     assert b'Review Pool' in client.get('/gallery/pool').data
     result = post(client, '/pool/review/1', action='accept', tag=['1','2'])
-    assert result.location.endswith('/pool/review/2')
+    assert result.location.split('?')[0].endswith('/pool/review/2')
     with app.app_context():
         photo = db.session.get(PhotoGroup, 1)
         assert photo.state == 'staging'
         assert {t.name for t in photo.tags} == {'Portrait', 'keeper'}
     # Previous/next wrap without changing workflow; each navigation saves tags.
-    assert post(client, '/pool/review/2', action='previous', tag='3').location.endswith('/pool/review/3')
-    assert post(client, '/pool/review/3', action='next').location.endswith('/pool/review/2')
+    assert post(client, '/pool/review/2', action='previous', tag='3').location.split('?')[0].endswith('/pool/review/3')
+    assert post(client, '/pool/review/3', action='next').location.split('?')[0].endswith('/pool/review/2')
     saved = post(client, '/pool/review/2', action='save', tag='4')
     assert '/pool/review/2' in saved.location
     with app.app_context():
         assert {t.name for t in db.session.get(PhotoGroup, 2).tags} == {'candidate'}
     result = post(client, '/pool/review/2', action='deny', tag='5')
-    assert result.location.endswith('/pool/review/3')
+    assert result.location.split('?')[0].endswith('/pool/review/3')
     with app.app_context():
         assert db.session.get(PhotoGroup, 2).state == 'never_post'
     assert post(client, '/pool/review/2', action='accept', new_tags='stale').status_code == 409
@@ -50,7 +50,7 @@ def test_review_queue_decisions_tags_and_wraparound(client, app):
         assert not Tag.query.filter_by(name='stale').first()
     assert post(client, '/pool/review/3', action='accept', version_id='1').status_code == 400
     assert client.post('/pool/review/3', data={'action': 'deny'}).status_code == 400
-    assert post(client, '/pool/review/3', action='accept').location.endswith('/pool/review')
+    assert post(client, '/pool/review/3', action='accept').location.split('?')[0].endswith('/pool/review')
     assert b'Pool is empty' in client.get('/pool/review').data
     assert app.test_client().get('/pool/review').status_code == 302
 

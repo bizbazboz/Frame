@@ -1,8 +1,23 @@
-# Frame
+<p align="center">
+  <img src="static/brand/frame-mark.svg" width="80" height="80" alt="Frame logo" />
+</p>
+<h1 align="center">Frame</h1>
+<p align="center">Your photo library. From first edit to final post.</p>
+<p align="center">
+  <a href="#docker-quick-start">Get started</a> &middot;
+  <a href="#configuration">Configuration</a> &middot;
+  <a href="#container-images-ghcr">Container images</a> &middot;
+  <a href="https://github.com/bizbazboz/Frame/issues">Issues</a>
+</p>
+<p align="center">
+  <a href="https://github.com/bizbazboz/Frame/actions/workflows/ci.yml"><img src="https://github.com/bizbazboz/Frame/actions/workflows/ci.yml/badge.svg" alt="CI and publish" /></a>
+  <img src="https://img.shields.io/badge/self--hosted-111315?style=flat&labelColor=111315&color=c3f26b" alt="Self-hosted" />
+  <a href="#pocket-id"><img src="https://img.shields.io/badge/Pocket_ID-ready-c3f26b?labelColor=111315" alt="Pocket ID ready" /></a>
+</p>
 
-[![CI and publish](https://github.com/bizbazboz/Frame/actions/workflows/ci.yml/badge.svg)](https://github.com/bizbazboz/Frame/actions/workflows/ci.yml)
+---
 
-A private Flask photo library and human-operated social-post tracker. Frame uses SQLite, server-rendered pages, and generic OIDC authentication, including Pocket ID. It records posts made externally; it never publishes through platform APIs.
+A private, self-hosted photo library and social-post tracker. Organise photo groups and edits, review your Pool, and track campaigns across accounts. Built with Flask, SQLite and OIDC authentication, including Pocket ID. Posts are recorded manually; Frame never publishes through platform APIs.
 
 ## Features
 

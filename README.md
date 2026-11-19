@@ -125,7 +125,7 @@ After tests and the Docker smoke test pass, pushes to `main` publish `ghcr.io/bi
 
 Publishing uses GitHub's built-in `GITHUB_TOKEN` with package-write permission, following the [GitHub Container Registry workflow](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images). No personal token or deployment credentials need to be stored in Actions. The package is linked to this repository through its image source label. To permit anonymous pulls, set the package's visibility to Public in GitHub package settings; otherwise authenticate Docker with an account that has package-read permission.
 
-To use the prebuilt Linux amd64 image, create a `compose.yml` beside your private `.env`:
+Images include Linux amd64 and arm64 variants. Docker automatically selects the correct architecture. To use the prebuilt image, create a `compose.yml` beside your private `.env`:
 
 ```yaml
 services:
@@ -148,3 +148,33 @@ docker compose up -d
 ```
 
 Configure OIDC and back up your library as described above. Existing pre-Alembic databases still require the one-time adoption command before the first start. For production deployments, choose a version or image digest when you need a fixed release.
+
+## Raspberry Pi
+
+Use a Raspberry Pi with a **64-bit OS**, such as Raspberry Pi OS Lite (64-bit) on a Pi 3, 4 or 5, and install [Docker Engine and the Compose plugin](https://docs.docker.com/engine/install/debian/). `uname -m` should report `aarch64`. The published image supports `linux/arm64`; 32-bit Raspberry Pi OS (`armv7l`/`armhf`) is not supported.
+
+```sh
+git clone https://github.com/bizbazboz/Frame.git
+cd Frame
+cp .env.example .env
+# Configure .env with your OIDC/Pocket ID client and a random SECRET_KEY.
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+The prebuilt Compose file works on both Raspberry Pi and amd64 hosts without a platform override or an on-device build. It persists the library in `./data/` and `./media/`. Register the callback using the Pi's actual hostname/domain, not `localhost` on another device. Use HTTPS for secure cookies and PWA installation; set `COOKIE_SECURE=false` only if testing over plain HTTP.
+
+For an existing pre-Alembic library, stop the old app and back up its data and media, then adopt it before starting this image:
+
+```sh
+docker compose -f docker-compose.ghcr.yml run --rm --entrypoint flask app --app app adopt-legacy-db
+```
+
+Update the running installation with:
+
+```sh
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+CI builds and smoke-tests the application on native amd64 and arm64 runners before publishing a [multi-platform image](https://docs.docker.com/build/ci/github-actions/multi-platform/). This validates the ARM64 container; physical Raspberry Pi hardware is not part of the CI environment.

@@ -18,3 +18,5 @@ tests/
 instance/
 *.db
 *.sqlite*
+
+.pwa-preview*

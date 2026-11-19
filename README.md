@@ -35,6 +35,12 @@ A private, self-hosted photo library and social-post tracker. Organise photo gro
 
 The database is persisted at `./data/app.db` and images at `./media/`. Back up both. Containers apply Alembic migrations before starting Gunicorn. Existing pre-Alembic libraries must follow the adoption steps below first.
 
+## Install as an app
+
+Frame is an installable Progressive Web App. Serve it over HTTPS (localhost/127.0.0.1 works over HTTP for development). In supporting desktop and Android browsers, use **Install Frame** in the sidebar when available, or the browser's install menu. On iPhone/iPad, open Frame in Safari and choose **Share → Add to Home Screen**. Installed windows use Frame's icon and dark theme; Pocket ID/OIDC sign-in remains required.
+
+The service worker caches only the public offline screen and app icons. Your library, uploaded photos, account details and authentication responses stay network-only, and private responses use `Cache-Control: no-store`. When disconnected, opening the app shows an offline screen; edits and uploads require a connection and are never queued for later. Reconnect and choose **Try again**. App updates take effect on the next page load without automatically reloading an unsaved form.
+
 ## Configuration
 
 | Variable | Purpose |

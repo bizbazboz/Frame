@@ -110,7 +110,7 @@ def create_app(config=None):
 
     @app.before_request
     def protect():
-        if request.endpoint in ('login', 'callback', 'static'): return
+        if request.endpoint in ('login', 'callback', 'static', 'manifest', 'service_worker'): return
         allowed = {x.strip() for x in os.getenv('OIDC_ALLOWED_SUBJECTS', '').split(',') if x.strip()}
         if not session.get('sub') or (allowed and session['sub'] not in allowed):
             session.clear()
@@ -123,7 +123,7 @@ def create_app(config=None):
     @app.before_request
     def lock_library_writes():
         # Shared across threads and workers; hold until commit/rollback, including deletions.
-        if request.method == 'POST' and request.endpoint not in ('login', 'callback', 'static'):
+        if request.method == 'POST' and request.endpoint not in ('login', 'callback', 'static', 'manifest', 'service_worker'):
             lock = FileLock(str(Path(app.config['MEDIA_ROOT']) / '.library-write.lock'))
             lock.acquire()
             g.library_write_lock = lock
@@ -147,6 +147,23 @@ def create_app(config=None):
     def commit_uploads():
         db.session.commit()
         g.upload_paths = []
+
+    @app.after_request
+    def private_cache_policy(response):
+        if request.endpoint not in ('static', 'manifest', 'service_worker'):
+            response.headers['Cache-Control'] = 'no-store, private'
+        return response
+
+    @app.get('/manifest.webmanifest')
+    def manifest():
+        return send_from_directory(app.static_folder, 'manifest.webmanifest', mimetype='application/manifest+json', max_age=0)
+
+    @app.get('/service-worker.js')
+    def service_worker():
+        response = send_from_directory(app.static_folder, 'service-worker.js', mimetype='application/javascript', max_age=0)
+        response.headers['Cache-Control'] = 'no-cache'
+        response.headers['Service-Worker-Allowed'] = '/'
+        return response
 
     @app.errorhandler(HTTPException)
     def http_error(error):

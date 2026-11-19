@@ -2,7 +2,7 @@
 {% block title %}Import photos · Frame{% endblock %}
 {% block content %}
 <div class="page-heading"><div><h1>Import photos</h1></div><a class="button secondary" href="{{ url_for('gallery',state='pool') }}">View Pool {{ icon('arrow',16) }}</a></div>
-<form method="post" enctype="multipart/form-data" class="import-shell" data-import-form>
+<form method="post" enctype="multipart/form-data" class="import-shell" data-import-form data-upload-start="{{ url_for('upload_start') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if current_project %}<input type="hidden" name="project_context" value="{{ current_project.id }}">{% endif %}
   <input type="file" name="files" multiple hidden disabled data-import-payload>
   <div class="import-workspace">
@@ -25,8 +25,8 @@
     </section>
   </div>
   <div class="import-feedback" role="status" aria-live="polite" data-import-feedback hidden></div>
-  <div class="import-bottom-bar"><div class="import-totals"><strong data-import-total role="status" aria-live="polite">0 files</strong><span>512 MB maximum</span></div><button type="submit" data-import-submit>{{ icon('plus',18) }} Import into Pool</button></div>
-</form>
+  <div class="import-bottom-bar"><div class="import-totals"><strong data-import-total role="status" aria-live="polite">0 files</strong></div><button type="submit" data-import-submit>{{ icon('plus',18) }} Import into Pool</button></div>
+<div class="upload-transfer"><progress data-import-progress max="100" value="0" hidden aria-label="Upload progress"></progress><button type="button" class="secondary" data-import-pause hidden>Pause</button></div></form>
 <template id="import-file-template"><li class="import-file-row"><span class="import-file-preview">{{ icon('image',20) }}<img width="44" height="44" alt="" loading="lazy"></span><div class="import-file-name"><strong></strong><span></span></div><button type="button" class="quiet icon-button">{{ icon('close',16) }}</button></li></template>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static',filename='import.js') }}" defer></script>{% endblock %}

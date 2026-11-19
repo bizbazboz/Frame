@@ -10,7 +10,7 @@ from test_app import app
 def test_initial_upgrade_restart_and_downgrade(app):
     with app.app_context():
         with db.engine.connect() as connection:
-            assert connection.execute(text('select version_num from alembic_version')).scalar() == '0002'
+            assert connection.execute(text('select version_num from alembic_version')).scalar() == '0004'
             assert compare_metadata(MigrationContext.configure(connection), db.metadata) == []
         upgrade()
         downgrade(revision='base')

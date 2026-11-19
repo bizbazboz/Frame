@@ -4,10 +4,10 @@ from sqlalchemy import func
 
 PUBLIC_ENDPOINTS = {'static', 'manifest', 'service_worker', 'login', 'callback', 'logout'}
 CONTEXT_ENDPOINTS = {'dashboard', 'import_photos', 'media', 'gallery', 'pool_review', 'group',
-                    'bulk_edit', 'delete_group', 'delete_version', 'campaign', 'tags', 'accounts', 'projects'}
+                    'bulk_edit', 'delete_group', 'delete_version', 'campaign', 'tags', 'accounts', 'projects', 'inspiration', 'delete_inspiration', 'upload_start', 'upload_status', 'upload_chunk', 'upload_finish', 'upload_cancel'}
 
 
-def register_projects(app, db, Project, PhotoGroup):
+def register_projects(app, db, Project, PhotoGroup, InspirationLink):
     @app.before_request
     def select_project():
         if not request.endpoint or request.endpoint in PUBLIC_ENDPOINTS:
@@ -87,6 +87,11 @@ def register_projects(app, db, Project, PhotoGroup):
                     abort(409, 'The last project cannot be deleted.')
                 if PhotoGroup.query.filter_by(project_id=item.id).first():
                     abort(409, "Move or delete this project's photos before deleting it.")
+                if InspirationLink.query.filter_by(project_id=item.id).first():
+                    abort(409, "Remove this project's inspiration links before deleting it.")
+                upload_model = app.extensions.get('upload_sessions')
+                if upload_model is not None and upload_model.query.filter_by(project_id=item.id, status='active').first():
+                    abort(409, 'Cancel active uploads before deleting this project.')
                 if item.id == redirect_id:
                     redirect_id = Project.query.filter(Project.id != item.id).order_by(Project.id).first().id
                 if session.get('project_id') == item.id:
@@ -97,4 +102,5 @@ def register_projects(app, db, Project, PhotoGroup):
             db.session.commit()
             return redirect(url_for('projects', project=redirect_id))
         counts = dict(db.session.query(PhotoGroup.project_id, func.count(PhotoGroup.id)).group_by(PhotoGroup.project_id).all())
-        return render_template('projects.html', project_counts=counts)
+        inspiration_counts = dict(db.session.query(InspirationLink.project_id, func.count(InspirationLink.id)).group_by(InspirationLink.project_id).all())
+        return render_template('projects.html', project_counts=counts, inspiration_counts=inspiration_counts)

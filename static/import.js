@@ -13,7 +13,10 @@
   const feedback = form.querySelector('[data-import-feedback]');
   const previewCount = form.querySelector('[data-import-preview-count]');
   const template = document.querySelector('#import-file-template');
-  const limit = 512 * 1024 * 1024;
+  const progress = form.querySelector('[data-import-progress]');
+  const pause = form.querySelector('[data-import-pause]');
+  let controller;
+  const uploadOptions = () => ({start:form.dataset.uploadStart,csrf:form.querySelector('[name="csrf_token"]').value});
   let queue = [], busy = false, reading = false, dragDepth = 0;
   payload.disabled = false;
   photos.removeAttribute('name');
@@ -28,7 +31,7 @@
     payload.files = transfer.files;
     const bytes = queue.reduce((sum, entry) => sum + entry.file.size, 0);
     total.textContent = `${queue.length} ${queue.length === 1 ? 'file' : 'files'}${queue.length ? ' · ' + formatSize(bytes) : ''}`;
-    submit.disabled = busy || reading || !queue.length || bytes > limit;
+    submit.disabled = busy || reading || !queue.length;
     clear.disabled = busy || reading || !queue.length;
     empty.hidden = queue.length > 0;
     list.hidden = !queue.length;
@@ -61,8 +64,6 @@
     previewCount.hidden = queue.length <= 50;
     previewCount.textContent = `50 of ${queue.length} files shown`;
     form.classList.toggle('has-selection', queue.length > 0);
-    form.classList.toggle('over-limit', bytes > limit);
-    if (bytes > limit) message('Selection exceeds the 512 MB upload limit.');
   }
   async function sameContents(left, right) {
     if (left.size !== right.size) return false;
@@ -80,7 +81,7 @@
   async function addFiles(entries) {
     let skipped = 0, duplicates = 0, unreadable = 0;
     reading = true; photos.disabled = folders.disabled = true;
-    form.setAttribute('aria-busy', 'true'); message('Checking files�'); render();
+    form.setAttribute('aria-busy', 'true'); message('Checking files…'); render();
     try {
       for (const item of entries) {
         const file = item.file || item;
@@ -110,7 +111,7 @@
     const files = [...input.files]; input.value = '';
     if (!busy && !reading) await addFiles(files);
   }));
-  clear.addEventListener('click', () => { queue.forEach(revoke); queue = []; message(''); render(); photos.focus({preventScroll:true}); });
+  clear.addEventListener('click', () => { queue.forEach(entry => {if(entry.ticket) window.FrameUploads.cancel(entry, uploadOptions()).catch(()=>{}); revoke(entry);}); queue = []; message(''); render(); photos.focus({preventScroll:true}); });
   const isFileDrag = event => [...(event.dataTransfer?.types || [])].includes('Files');
   dropzone.addEventListener('dragenter', event => {
     if (!isFileDrag(event) || busy || reading) return;
@@ -165,17 +166,35 @@
   window.addEventListener('dragover', event => { if (isFileDrag(event)) event.preventDefault(); });
   window.addEventListener('drop', event => { if (isFileDrag(event)) event.preventDefault(); });
   const idleLabel = submit.innerHTML;
-  form.addEventListener('submit', event => {
-    const bytes = queue.reduce((sum, entry) => sum + entry.file.size, 0);
-    if (busy || reading || !queue.length || bytes > limit) {
-      event.preventDefault();
-      if (!queue.length) message('No photos selected.');
-      return;
+  pause.addEventListener('click', () => controller?.abort());
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (busy || reading || !queue.length) return;
+    busy=true; controller=new AbortController(); form.setAttribute('aria-busy','true');
+    photos.disabled=folders.disabled=true; pause.hidden=false; progress.hidden=false; render();
+    let imported=0, duplicates=0;
+    try {
+      while(queue.length) {
+        const entry=queue[0];
+        const result=await window.FrameUploads.upload(entry,{...uploadOptions(),signal:controller.signal,
+          onProgress:(sent,size,finishing)=>{
+            progress.value=sent/size*100;
+            message(finishing?`Checking ${entry.file.name}…`:`${entry.file.name} · ${Math.floor(sent/size*100)}%`);
+            submit.textContent='Importing…';
+          }});
+        if (result.status==='complete') imported++;
+        else if (result.status==='duplicate') duplicates++;
+        else throw new Error('Upload could not be completed.');
+        revoke(entry); queue.shift(); render();
+      }
+      message(`Imported ${imported} ${imported===1?'photo':'photos'}${duplicates?` · ${duplicates} duplicates skipped`:''}.`);
+    } catch(error) {
+      message(error.name==='AbortError'?`Paused · ${imported} saved`:error.message);
+    } finally {
+      busy=false; photos.disabled=folders.disabled=false; pause.hidden=true;
+      form.removeAttribute('aria-busy'); submit.innerHTML=idleLabel; render();
+      if(queue.some(entry=>entry.ticket)) submit.textContent='Resume import';
     }
-    busy = true; form.setAttribute('aria-busy', 'true');
-    submit.textContent = 'Importing…'; submit.disabled = clear.disabled = true;
-    photos.disabled = folders.disabled = true;
-    list.querySelectorAll('button').forEach(button => { button.disabled = true; });
   });
   window.addEventListener('pageshow', () => {
     busy = false; photos.disabled = folders.disabled = false;

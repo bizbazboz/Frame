@@ -21,16 +21,49 @@ from image_analysis import inspect_image
 from media_deletion import delete_with_media, MediaDeletionError
 from database_setup import register_database_commands
 from projects import register_projects
+from inspiration import register_inspiration, parse_inspiration_url
+from chunk_uploads import register_uploads
 
 load_dotenv()
 db = SQLAlchemy()
 group_tags = db.Table('group_tags', db.Column('group_id', db.ForeignKey('photo_group.id'), primary_key=True), db.Column('tag_id', db.ForeignKey('tag.id'), primary_key=True))
+
+class UploadSession(db.Model):
+    id = db.Column(db.String(32), primary_key=True)
+    owner = db.Column(db.String(255), nullable=False)
+    project_id = db.Column(db.Integer, nullable=False, index=True)
+    group_id = db.Column(db.Integer)
+    filename = db.Column(db.String(500), nullable=False)
+    label = db.Column(db.String(200), nullable=False)
+    total_bytes = db.Column(db.BigInteger, nullable=False)
+    received_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    chunk_bytes = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='active')
+    version_id = db.Column(db.Integer)
+    message = db.Column(db.String(500), nullable=False, default='')
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
 
 class Project(db.Model):
     __table_args__ = {'sqlite_autoincrement': True}
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class InspirationLink(db.Model):
+    __table_args__ = (db.UniqueConstraint('project_id', 'url', name='uq_inspiration_project_url'), {'sqlite_autoincrement': True})
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False, index=True)
+    provider = db.Column(db.String(20), nullable=False)
+    url = db.Column(db.String(1000), nullable=False)
+    title = db.Column(db.String(160), nullable=False, default='')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    project = db.relationship('Project', backref='inspiration_links')
+
+    @property
+    def embed_url(self):
+        return parse_inspiration_url(self.url)[2]
 
 
 class PhotoGroup(db.Model):
@@ -49,6 +82,7 @@ class PhotoVersion(db.Model):
     label = db.Column(db.String(200), nullable=False)
     original_filename = db.Column(db.String(500), nullable=False)
     stored_path = db.Column(db.String(500), nullable=False, unique=True)
+    content_hash = db.Column(db.String(64), index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 class TagGroup(db.Model):
@@ -101,7 +135,7 @@ STATES = ('pool', 'staging', 'never_post', 'final')
 def create_app(config=None):
     app = Flask(__name__)
     root = Path(app.root_path)
-    app.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI='sqlite:///' + str(root / 'data' / 'app.db'), SQLALCHEMY_TRACK_MODIFICATIONS=False, MEDIA_ROOT=str(root / 'media'), SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.getenv('COOKIE_SECURE', 'true').lower() == 'true', MAX_CONTENT_LENGTH=512 * 1024 * 1024)
+    app.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI='sqlite:///' + str(root / 'data' / 'app.db'), SQLALCHEMY_TRACK_MODIFICATIONS=False, MEDIA_ROOT=str(root / 'media'), SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.getenv('COOKIE_SECURE', 'true').lower() == 'true', MAX_CONTENT_LENGTH=None, UPLOAD_CHUNK_BYTES=int(os.getenv('UPLOAD_CHUNK_SIZE_MB', '8')) * 1024 * 1024)
     if config: app.config.update(config)
     if not app.config['SECRET_KEY']: raise RuntimeError('SECRET_KEY is required')
     if os.getenv('TRUST_PROXY', 'false').lower() == 'true': app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -119,21 +153,30 @@ def create_app(config=None):
             path.parent.mkdir(parents=True, exist_ok=True)
 
     @app.before_request
+    def upload_request_limits():
+        if request.endpoint == 'upload_chunk':
+            request.max_content_length = 16 * 1024 * 1024 + 1
+        elif (request.endpoint or '').startswith('upload_'):
+            request.max_content_length = 16 * 1024
+
+    @app.before_request
     def protect():
         if request.endpoint in ('login', 'callback', 'static', 'manifest', 'service_worker'): return
         allowed = {x.strip() for x in os.getenv('OIDC_ALLOWED_SUBJECTS', '').split(',') if x.strip()}
         if not session.get('sub') or (allowed and session['sub'] not in allowed):
             session.clear()
+            if (request.endpoint or '').startswith('upload_'):
+                return {'error': 'Sign in again before continuing the upload.'}, 401
             return redirect(url_for('login'))
-        if request.method == 'POST' and (not session.get('csrf') or request.form.get('csrf_token') != session['csrf']): abort(400)
-        if request.method == 'GET' and request.endpoint and request.endpoint != 'media' and not session.get('profile_loaded') and session.get('display_name') in (None, 'User'):
+        if request.method == 'POST' and (not session.get('csrf') or (request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')) != session['csrf']): abort(400)
+        if request.method == 'GET' and request.endpoint and request.endpoint != 'media' and not request.endpoint.startswith('upload_') and not session.get('profile_loaded') and session.get('display_name') in (None, 'User'):
             session['profile_return_to'] = request.full_path.rstrip('?')
             return redirect(url_for('login'))
 
     @app.before_request
     def lock_library_writes():
         # Shared across threads and workers; hold until commit/rollback, including deletions.
-        if request.method == 'POST' and request.endpoint not in ('login', 'callback', 'static', 'manifest', 'service_worker'):
+        if request.method == 'POST' and request.endpoint not in ('login', 'callback', 'static', 'manifest', 'service_worker', 'upload_chunk'):
             lock = FileLock(str(Path(app.config['MEDIA_ROOT']) / '.library-write.lock'))
             lock.acquire()
             g.library_write_lock = lock
@@ -146,7 +189,11 @@ def create_app(config=None):
             try:
                 db.session.rollback()
                 for path in g.pop('upload_paths', []):
-                    path.unlink(missing_ok=True)
+                    source = g.get('upload_moves', {}).get(path)
+                    if source and path.exists():
+                        path.replace(source)
+                    else:
+                        path.unlink(missing_ok=True)
                     try:
                         path.parent.rmdir()
                     except OSError:
@@ -157,8 +204,10 @@ def create_app(config=None):
     def commit_uploads():
         db.session.commit()
         g.upload_paths = []
+        g.upload_moves = {}
 
-    register_projects(app, db, Project, PhotoGroup)
+    register_projects(app, db, Project, PhotoGroup, InspirationLink)
+    register_inspiration(app, db, InspirationLink)
 
     def project_photos():
         return PhotoGroup.query.filter_by(project_id=g.project.id)
@@ -185,6 +234,8 @@ def create_app(config=None):
 
     @app.errorhandler(HTTPException)
     def http_error(error):
+        if (request.endpoint or '').startswith('upload_'):
+            return {'error': error.description}, error.code
         return render_template('error.html', error=error), error.code
 
     @app.context_processor
@@ -237,36 +288,46 @@ def create_app(config=None):
     def dashboard():
         return render_template('dashboard.html', counts={s: project_photos().filter_by(state=s).count() for s in STATES}, recent=project_photos().order_by(PhotoGroup.created_at.desc(), PhotoGroup.id.desc()).limit(5).all(), planned=CampaignDestination.query.join(Campaign).join(PhotoGroup).filter(PhotoGroup.project_id == g.project.id, CampaignDestination.status == 'planned').count())
 
-    def store(file, group, label):
+    def store(file, group, label, source_path=None):
         filename = secure_filename(file.filename or '')
         if not filename: raise ValueError('Please choose an image file')
         if Path(filename).suffix.lower() not in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif'}: raise ValueError('Supported images: JPG, PNG, GIF, WebP and AVIF')
-        # No schema change: include every existing managed version on first upload.
+        # Hash in bounded blocks; never read an entire image into memory.
         def digest(stream):
             result = hashlib.sha256()
             for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                 result.update(chunk)
             return result.digest()
 
-        if not hasattr(g, 'library_hashes'):
-            g.library_hashes = {}
-            for version in PhotoVersion.query.all():
-                existing = Path(app.config['MEDIA_ROOT']) / version.stored_path
-                if existing.is_file():
-                    with existing.open('rb') as source:
-                        g.library_hashes[digest(source)] = version.group.project.name
         file.stream.seek(0)
-        fingerprint = digest(file.stream)
+        fingerprint = digest(file.stream).hex()
         file.stream.seek(0)
-        if fingerprint in g.library_hashes:
-            raise ValueError(f'Duplicate skipped: this image already exists in project "{g.library_hashes[fingerprint]}".')
+        existing_version = PhotoVersion.query.filter_by(content_hash=fingerprint).first()
+        # Backfill existing libraries once; subsequent imports use the indexed hash.
+        for version in PhotoVersion.query.filter_by(content_hash=None).all():
+            existing = Path(app.config['MEDIA_ROOT']) / version.stored_path
+            if existing.is_file():
+                with existing.open('rb') as source:
+                    version.content_hash = digest(source).hex()
+                if version.content_hash == fingerprint:
+                    existing_version = version
+        if existing_version:
+            raise ValueError(f'Duplicate skipped: this image already exists in project "{existing_version.group.project.name}".')
         folder = Path(app.config['MEDIA_ROOT']) / str(group.id)
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / (uuid.uuid4().hex + Path(filename).suffix.lower())
         g.upload_paths.append(path)
-        file.save(path)
-        g.library_hashes[fingerprint] = group.project.name
-        db.session.add(PhotoVersion(group=group, label=label or 'Original', original_filename=file.filename, stored_path=f'{group.id}/{path.name}'))
+        if source_path:
+            g.setdefault('upload_moves', {})[path] = source_path
+            file.close()
+            source_path.replace(path)
+        else:
+            file.save(path)
+        version = PhotoVersion(group=group, label=label or 'Original', original_filename=file.filename, stored_path=f'{group.id}/{path.name}', content_hash=fingerprint)
+        db.session.add(version)
+        return version
+
+    register_uploads(app, db, UploadSession, PhotoGroup, PhotoVersion, store, commit_uploads)
 
     @app.route('/import', methods=['GET', 'POST'])
     def import_photos():

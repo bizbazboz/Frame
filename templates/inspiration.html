@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Inspiration · Frame{% endblock %}
+{% block content %}
+<div class="page-heading"><h1>Inspiration</h1></div>
+<section class="surface-section inspiration-add"><form method="post" action="{{ url_for('inspiration') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="project_context" value="{{ current_project.id }}"><label>Post link<input type="url" name="url" required maxlength="2048" placeholder="Reddit or Instagram post URL" value="{{ request.form.get('url','') if request.method == 'POST' else '' }}"></label><label class="inspiration-title-input">Title<input name="title" maxlength="160" placeholder="Optional" value="{{ request.form.get('title','') if request.method == 'POST' else '' }}"></label><button>Save link</button></form></section>
+<div class="inspiration-grid">{% for item in entries %}
+<article class="inspiration-card"><header><div><span class="inspiration-provider">{{ 'Reddit' if item.provider == 'reddit' else 'Instagram' }}</span><h2>{{ item.title or ('Reddit post' if item.provider == 'reddit' else 'Instagram post') }}</h2></div><form method="post" action="{{ url_for('delete_inspiration',id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="project_context" value="{{ current_project.id }}"><button class="icon-button danger" aria-label="Delete {{ item.title or item.provider ~ ' link' }}" title="Delete link">{{ icon('close',18) }}</button></form></header>
+<iframe class="inspiration-frame inspiration-{{ item.provider }}" src="{{ item.embed_url }}" title="{{ ('Reddit' if item.provider == 'reddit' else 'Instagram') ~ ': ' ~ (item.title or 'Saved post') }}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms" allow="fullscreen" allowfullscreen data-inspiration-embed="{{ item.provider }}"></iframe>
+<footer><time datetime="{{ item.created_at.isoformat() }}">{{ item.created_at.strftime('%d %b %Y') }}</time><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Open post {{ icon('arrow',16) }}</a></footer></article>
+{% else %}<div class="empty-state wide">{{ icon('image',40) }}<h2>No inspiration yet</h2></div>{% endfor %}</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static',filename='inspiration.js') }}" defer></script>{% endblock %}

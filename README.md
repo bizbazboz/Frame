@@ -44,6 +44,26 @@ Existing libraries upgrade into **Main library** automatically through migration
 
 Project context is included in links and forms so another tab's project switch cannot redirect an upload or edit into the wrong set. The most recent sidebar selection is remembered in the current login session. A project containing photos and the last remaining project cannot be deleted.
 
+## Large and resumable uploads
+
+Imports and edited versions use separate **8 MiB HTTP requests**, rather than sending the whole selection in one request. This follows [Cloudflare's smaller-request upload guidance](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/) and avoids the per-request body limit. Frame has no total file or selection size cap; available storage and image-format/browser capabilities still apply. JavaScript is required for chunking; non-JavaScript multipart uploads remain subject to your proxy's request limits.
+
+`UPLOAD_CHUNK_SIZE_MB` defaults to `8` and accepts `1`–`16` (MiB). Set your reverse proxy's per-request allowance above the configured chunk size. Progress, automatic retries and Pause/Resume work while the selected files remain open in the page. Closing/reloading the page requires reselecting files. Already completed files stay saved. Import completion stays on the import screen with a summary; **View Pool** opens the imported photos.
+
+Upload IDs are bound to the signed-in subject and project. Replayed chunks and completion requests are idempotent. Partial data stays in `media/.uploads/` and is never served as library media. Completed files are hashed in bounded blocks, checked for duplicates, then moved into the managed library. Existing content hashes are indexed on first use. Gunicorn's worker timeout is 300 seconds to accommodate large-file verification.
+
+Uploads and completion receipts inactive for 24 hours are removed when another upload starts, or manually with:
+
+```sh
+docker compose exec app flask --app app uploads-cleanup
+```
+
+## Inspiration
+
+Each project has an **Inspiration** page for Reddit posts/comments and Instagram posts/reels. Save a full post URL and an optional title to create an embedded card. Tracking parameters are stripped, and repeat links within the same project are skipped. The same link can be saved in different projects.
+
+Cards use isolated frames served by Reddit or Instagram, with a permanent **Open post** link. Private, removed or embedding-disabled posts may not render. No platform API credentials or server-side social API calls are used. Inspiration is not cached offline. Remove a project's inspiration links before deleting the empty project.
+
 ## Install as an app
 
 Frame is an installable Progressive Web App. Serve it over HTTPS (localhost/127.0.0.1 works over HTTP for development). In supporting desktop and Android browsers, use **Install Frame** in the sidebar when available, or the browser's install menu. On iPhone/iPad, open Frame in Safari and choose **Share → Add to Home Screen**. Installed windows use Frame's icon and dark theme; Pocket ID/OIDC sign-in remains required.
@@ -61,6 +81,7 @@ The service worker caches only the public offline screen and app icons. Your lib
 | `OIDC_ALLOWED_SUBJECTS` | Comma-separated subject IDs; blank permits all authenticated identities. |
 | `TRUST_PROXY` | Set true only behind a trusted proxy providing forwarded headers. |
 | `COOKIE_SECURE` | Keep true for HTTPS; false for local HTTP only. |
+| `UPLOAD_CHUNK_SIZE_MB` | Transport chunk size in MiB, from 1 to 16; default 8. |
 
 No real credentials are included. Runtime configuration, databases and photos are ignored by Git and excluded from Docker builds.
 

@@ -23,8 +23,8 @@ def client(app):
         s['sub'] = 'allowed'; s['csrf'] = 'token'; s['profile_loaded'] = True
     return client
 
-def post(client, url, **data):
-    return client.post(url, data={'csrf_token': 'token', **data})
+def post(client, path, **data):
+    return client.post(path, data={'csrf_token': 'token', **data})
 
 def test_schema_restart(tmp_path):
     config = {'TESTING': True, 'SECRET_KEY': 'test', 'SQLALCHEMY_DATABASE_URI': 'sqlite:///' + str(tmp_path / 'db.sqlite'), 'MEDIA_ROOT': str(tmp_path / 'media')}

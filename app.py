@@ -9,7 +9,7 @@ from pathlib import Path
 
 from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
-from flask import Flask, g, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, g, abort, flash, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from sqlalchemy import exists
@@ -23,6 +23,7 @@ from database_setup import register_database_commands
 from projects import register_projects
 from inspiration import register_inspiration, parse_inspiration_url
 from chunk_uploads import register_uploads
+from image_proxies import cached_proxy, VARIANTS, PREVIEW_ERRORS, PLACEHOLDER
 
 load_dotenv()
 db = SQLAlchemy()
@@ -351,6 +352,33 @@ def create_app(config=None):
     def media(path):
         PhotoVersion.query.join(PhotoGroup).filter(PhotoVersion.stored_path == path, PhotoGroup.project_id == g.project.id).first_or_404()
         return send_from_directory(app.config['MEDIA_ROOT'], path)
+
+    @app.get('/preview/<int:version_id>/<variant>')
+    def image_preview(version_id, variant):
+        if variant not in VARIANTS:
+            abort(404)
+        version = PhotoVersion.query.join(PhotoGroup).filter(PhotoVersion.id == version_id, PhotoGroup.project_id == g.project.id).first_or_404()
+        try:
+            path = cached_proxy(app.config['MEDIA_ROOT'], version, variant)
+            return send_file(path, mimetype='image/webp', conditional=True)
+        except PREVIEW_ERRORS:
+            app.logger.warning('Could not render preview for version %s', version.id, exc_info=True)
+            return app.response_class(PLACEHOLDER, mimetype='image/svg+xml')
+
+    @app.cli.command('previews-build')
+    def build_previews():
+        """Warm the disposable preview cache for all existing photos."""
+        import click
+        rendered = failed = 0
+        for version in PhotoVersion.query.order_by(PhotoVersion.id).yield_per(50):
+            try:
+                for variant in VARIANTS:
+                    cached_proxy(app.config['MEDIA_ROOT'], version, variant)
+                rendered += 1
+            except PREVIEW_ERRORS:
+                failed += 1
+                click.echo(f'Preview unavailable: version {version.id}', err=True)
+        click.echo(f'{rendered} versions ready; {failed} unavailable. Originals unchanged.')
 
     @app.get('/gallery/<state>')
     def gallery(state):

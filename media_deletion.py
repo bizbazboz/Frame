@@ -23,6 +23,15 @@ def delete_with_media(db, record, versions, media_root):
             raise MediaDeletionError('Managed image path is not a file.')
         paths.append(path)
         folders.add(folder)
+        preview_folder = (root / '.previews').resolve()
+        if not preview_folder.is_relative_to(root) or preview_folder == root:
+            raise MediaDeletionError('Invalid preview cache path.')
+        if preview_folder.is_dir():
+            for preview in preview_folder.glob(f'{version.id}-*.webp'):
+                if preview.is_symlink() or not preview.is_file():
+                    raise MediaDeletionError('Invalid preview cache file.')
+                paths.append(preview)
+            folders.add(preview_folder)
     staging = Path(tempfile.mkdtemp(prefix='.deleting-', dir=root))
     moved = []
     try:

@@ -179,6 +179,20 @@ docker compose up -d
 
 Configure OIDC and back up your library as described above. Existing pre-Alembic databases still require the one-time adoption command before the first start. For production deployments, choose a version or image digest when you need a fixed release.
 
+## Optimized image previews
+
+Gallery thumbnails use WebP proxies up to 640 pixels and 100 KB. Photo workspaces, Pool review, and campaign previews use proxies up to 2400 pixels and 500 KB. Quality and dimensions adapt to stay within these byte budgets. Originals remain untouched and can be downloaded from the version list; metadata and histograms still use originals.
+
+Previews are generated on first access and reused from the disposable `media/.previews/` cache. They require authentication and the matching project, are not cached offline, and are deleted with their photo/version. EXIF orientation is applied and embedded metadata is removed. Animated files display their first frame. Invalid or unsupported files show a small placeholder instead of loading a large original.
+
+To generate previews ahead of first viewing, run:
+
+```sh
+docker compose exec app flask --app app previews-build
+```
+
+No database migration is needed. The preview cache can be deleted while the app is stopped; it will regenerate.
+
 ## Raspberry Pi
 
 Use a Raspberry Pi with a **64-bit OS**, such as Raspberry Pi OS Lite (64-bit) on a Pi 3, 4 or 5, and install [Docker Engine and the Compose plugin](https://docs.docker.com/engine/install/debian/). `uname -m` should report `aarch64`. The published image supports `linux/arm64`; 32-bit Raspberry Pi OS (`armv7l`/`armhf`) is not supported.

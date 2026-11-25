@@ -25,7 +25,7 @@ A private, self-hosted photo library and social-post tracker. Organise photo gro
 - Pool review with metadata, histogram, category tags, and Staging/Never Post decisions.
 - Local projects with a sidebar switcher, separate photo sets and project-aware galleries.
 - Filterable galleries, bulk editing and deletion, and configurable tags and tag groups.
-- Reusable platforms and accounts, campaigns with multiple destinations, and planned/published tracking.
+- Reusable platforms and accounts, campaigns with ordered image sets and multiple destinations, and planned/published tracking.
 - Dark interface, authenticated image access, CSRF protection, and local logout.
 
 ## Docker quick start
@@ -40,7 +40,7 @@ The database is persisted at `./data/app.db` and images at `./media/`. Back up b
 
 Choose a project from the sidebar dropdown. The adjacent **+** opens project management, where you can create or rename projects and delete empty ones. Each project has its own photos, workflow counts, review queue and campaigns. Tags, classifications, platforms and social accounts are shared and reusable across projects. Projects organise one local library; they are not separate user permissions or tenants.
 
-Existing libraries upgrade into **Main library** automatically through migration `0002`; image paths, tags, campaigns and publication history are preserved. To reorganise existing photos, select them in a gallery, open **Bulk edit**, and choose **Move to project**. Versions and campaign records move with their group; files stay in the managed media folder. Duplicate prevention still spans all projects, and duplicate messages name the project containing the image.
+Existing libraries upgrade into **Main library** automatically through migration `0002`; image paths, tags, campaigns and publication history are preserved. To reorganise existing photos, select them in a gallery, open **Bulk edit**, and choose **Move to project**. Move all photo groups belonging to a multi-image campaign together (partial moves are rejected). Versions and campaign records move with their groups; files stay in the managed media folder. Duplicate prevention still spans all projects, and duplicate messages name the project containing the image.
 
 Project context is included in links and forms so another tab's project switch cannot redirect an upload or edit into the wrong set. The most recent sidebar selection is remembered in the current login session. A project containing photos and the last remaining project cannot be deleted.
 
@@ -135,11 +135,11 @@ Commit revisions with their model changes. SQLite alterations use batch mode. Ba
 
 ## Library behaviour
 
-Tags are created only on the Tags page and assigned to photo groups through category dropdowns. Groups move between Pool, Staging and Never Post explicitly. Never Post blocks new campaigns. Marking a campaign's first destination published moves its group to Final. Publication times and date filters use UTC.
+Tags are created only on the Tags page and assigned to photo groups through category dropdowns. Groups move between Pool, Staging and Never Post explicitly. Never Post blocks new campaigns. Marking a campaign's first destination published moves all its included photo groups to Final. Publication times and date filters use UTC.
 
 Imports and version uploads compare SHA-256 hashes against every tracked image, including existing libraries. Renamed exact duplicates are skipped, including simultaneous uploads. Different edits and re-encoded files remain distinct. Existing duplicates are not removed automatically. Browser selection also removes exact duplicates before submission.
 
-Bulk operations support up to 500 groups. Deleting a group removes its versions, campaigns, destinations and tracked files; shared tags/accounts and untracked files remain. A version cannot be deleted if it is the last version or is used by a campaign. Files are staged and restored if a database deletion fails.
+Bulk operations support up to 500 groups. Deleting a group removes its versions, campaigns, destinations and tracked files. Groups in a multi-group campaign must be selected together for deletion, or removed from that campaign first; shared tags/accounts and untracked files remain. A version cannot be deleted if it is the last version or is used by a campaign. Files are staged and restored if a database deletion fails.
 
 The sidebar shows the OIDC display name and uses a DiceBear Notionists avatar with an opaque HMAC seed; raw subjects and emails are not sent as seeds. Metadata inspection reads EXIF/IPTC/XMP and other Pillow-supported fields without modifying files. Proprietary camera MakerNotes are not decoded.
 
@@ -178,6 +178,28 @@ docker compose up -d
 ```
 
 Configure OIDC and back up your library as described above. Existing pre-Alembic databases still require the one-time adoption command before the first start. For production deployments, choose a version or image digest when you need a fixed release.
+
+## Campaigns
+
+The **Campaigns** sidebar page manages campaigns for the current project. Create, edit, or delete campaigns and filter them by name, account, platform, planned/published status, or publication dates. Account, status and date filters match the same destination.
+
+A campaign contains one or more image versions, including images from different groups within the same project. Add images in the editor, choose versions from the dropdowns, and use the up/down controls to set their order. The first image acts as the cover. Each destination retains its own publication status, UTC timestamp and public post URL. Publishing any destination moves all included groups to Final; adding an image to an already-published campaign does the same for that image's group.
+
+Never Post images cannot be added to new campaigns. Previously linked images remain editable. Linked versions cannot be deleted, and multi-group campaigns must remain together when moving projects or deleting groups. Deleting a campaign removes its image links and destination records while preserving all photo groups, originals, and workflow states.
+
+Migration `0006` preserves each existing campaign's selected image as its first image. Run the normal Alembic upgrade before using this version.
+
+## Reddit analytics
+
+Create a platform named **Reddit** in Social accounts, then add accounts with their Reddit username in the Handle field (`username`, `u/username`, `@username`, or a Reddit profile URL). Existing Reddit accounts are available automatically in the **Reddit analytics** sidebar tab. Accounts and analytics are shared across local projects, like other social profiles.
+
+Sync posts manually from [Arctic Shift](https://github.com/ArthurHeitmann/arctic_shift/blob/master/api/README.md). Each account has its own locally stored posts and saved sync progress. Sync runs in batches while the page is open, can pause and resume, and refreshes from the newest post once the previous sync is complete. A failed or rate-limited batch leaves previously saved data intact. Changing an account's username hides its old statistics and replaces that cache after a successful sync for the new identity.
+
+Rank posts by score, comments, or date; filter by title, subreddit, date range (UTC), minimum score/comments, and NSFW status. Totals and top subreddits reflect the current filters. Missing metrics remain unknown rather than being recorded as zero.
+
+These are archive snapshots, not live Reddit insights. Archive coverage can be incomplete; recent scores/comments can be placeholders until Arctic Shift updates them (its documentation says roughly 36 hours). Private account insights such as impressions, reach, and click-through rates are unavailable. Refreshing retrieves the archive's latest available values and retains cached posts absent from a later response. No Reddit passwords, OAuth credentials, automated posting, or background jobs are involved. Sync contacts Arctic Shift with the selected public username.
+
+Apply the included Alembic migration before running this version (`flask --app app db upgrade`; Docker startup already runs migrations). This feature does not deploy itself or publish anything.
 
 ## Optimized image previews
 

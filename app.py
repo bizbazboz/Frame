@@ -24,6 +24,8 @@ from projects import register_projects
 from inspiration import register_inspiration, parse_inspiration_url
 from chunk_uploads import register_uploads
 from image_proxies import cached_proxy, VARIANTS, PREVIEW_ERRORS, PLACEHOLDER
+from reddit_analytics import register_reddit_analytics, reddit_username
+from campaigns import register_campaigns
 
 load_dotenv()
 db = SQLAlchemy()
@@ -77,6 +79,10 @@ class PhotoGroup(db.Model):
     tags = db.relationship('Tag', secondary=group_tags, backref='photos')
     campaigns = db.relationship('Campaign', backref='group', cascade='all, delete-orphan')
 
+    @property
+    def linked_campaigns(self):
+        return Campaign.query.filter((Campaign.group_id == self.id) | Campaign.images.any(CampaignImage.version.has(PhotoVersion.group_id == self.id))).order_by(Campaign.id.desc()).all()
+
 class PhotoVersion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     group_id = db.Column(db.Integer, db.ForeignKey('photo_group.id'), nullable=False)
@@ -113,6 +119,32 @@ class SocialAccount(db.Model):
     profile_url = db.Column(db.String(1000), default='')
     active = db.Column(db.Boolean, nullable=False, default=True)
 
+class RedditSync(db.Model):
+    account_id = db.Column(db.Integer, db.ForeignKey('social_account.id'), primary_key=True)
+    username = db.Column(db.String(20), nullable=False)
+    before = db.Column(db.BigInteger)
+    complete = db.Column(db.Boolean, nullable=False, default=False)
+    synced_at = db.Column(db.DateTime)
+
+class RedditPost(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('social_account.id'), nullable=False, index=True)
+    reddit_id = db.Column(db.String(20), nullable=False)
+    username = db.Column(db.String(20), nullable=False)
+    title = db.Column(db.Text, nullable=False)
+    subreddit = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, index=True)
+    score = db.Column(db.Integer)
+    comments = db.Column(db.Integer)
+    nsfw = db.Column(db.Boolean, nullable=False, default=False)
+    retrieved_at = db.Column(db.DateTime)
+    synced_at = db.Column(db.DateTime, nullable=False)
+    __table_args__ = (db.UniqueConstraint('account_id', 'reddit_id', name='uq_reddit_post_account_id'),)
+
+    @property
+    def permalink(self):
+        return f'https://www.reddit.com/comments/{self.reddit_id}/'
+
 class Campaign(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     group_id = db.Column(db.Integer, db.ForeignKey('photo_group.id'), nullable=False)
@@ -120,6 +152,19 @@ class Campaign(db.Model):
     name = db.Column(db.String(200), nullable=False)
     version = db.relationship('PhotoVersion')
     destinations = db.relationship('CampaignDestination', backref='campaign', cascade='all, delete-orphan')
+    images = db.relationship('CampaignImage', backref='campaign', cascade='all, delete-orphan', order_by='CampaignImage.position')
+
+    @property
+    def versions(self):
+        return [image.version for image in self.images] or [self.version]
+
+class CampaignImage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    campaign_id = db.Column(db.Integer, db.ForeignKey('campaign.id'), nullable=False, index=True)
+    version_id = db.Column(db.Integer, db.ForeignKey('photo_version.id'), nullable=False, index=True)
+    position = db.Column(db.Integer, nullable=False)
+    version = db.relationship('PhotoVersion')
+    __table_args__ = (db.UniqueConstraint('campaign_id', 'version_id', name='uq_campaign_image_version'),)
 
 class CampaignDestination(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -209,6 +254,18 @@ def create_app(config=None):
 
     register_projects(app, db, Project, PhotoGroup, InspirationLink)
     register_inspiration(app, db, InspirationLink)
+    register_reddit_analytics(app, db, SocialAccount, Platform, RedditPost, RedditSync)
+    register_campaigns(app, db, PhotoGroup, PhotoVersion, Campaign, CampaignImage, CampaignDestination, SocialAccount, Platform)
+
+    def version_in_campaign(version_id):
+        return Campaign.query.filter_by(version_id=version_id).first() or CampaignImage.query.filter_by(version_id=version_id).first()
+
+    def protect_linked_campaigns(photos):
+        selected_ids = {photo.id for photo in photos}
+        for photo in photos:
+            for campaign in photo.linked_campaigns:
+                if any(version.group_id not in selected_ids for version in campaign.versions):
+                    abort(409, 'This photo belongs to a multi-image campaign. Edit the campaign first, or select all its photo groups together.')
 
     def project_photos():
         return PhotoGroup.query.filter_by(project_id=g.project.id)
@@ -402,7 +459,7 @@ def create_app(config=None):
         start = request.args.get('start', ''); end = request.args.get('end', '')
         if status and status not in ('planned', 'published'): abort(400)
         if platform or account or status or start or end:
-            dq = db.session.query(CampaignDestination.id).join(Campaign).join(SocialAccount).filter(Campaign.group_id == PhotoGroup.id)
+            dq = db.session.query(CampaignDestination.id).join(Campaign).join(SocialAccount).filter((Campaign.group_id == PhotoGroup.id) | Campaign.id.in_(db.session.query(CampaignImage.campaign_id).join(PhotoVersion).filter(PhotoVersion.group_id == PhotoGroup.id).correlate(PhotoGroup)))
             if platform: dq = dq.filter(SocialAccount.platform_id == platform)
             if account: dq = dq.filter(CampaignDestination.account_id == account)
             if status: dq = dq.filter(CampaignDestination.status == status)
@@ -478,7 +535,7 @@ def create_app(config=None):
         analysis = inspect_image(app.config['MEDIA_ROOT'], version.stored_path) if version else None
         return render_template('review.html', photo=photo, version=version, analysis=analysis,
                                position=index + 1, remaining=len(queue), tags=Tag.query.order_by(Tag.name).all(),
-                               version_in_use=bool(version and Campaign.query.filter_by(version_id=version.id).first()))
+                               version_in_use=bool(version and version_in_campaign(version.id)))
 
     @app.route('/group/<int:id>', methods=['GET', 'POST'])
     def group(id):
@@ -500,7 +557,7 @@ def create_app(config=None):
             else: abort(400)
             commit_uploads(); return redirect(url_for('group', id=id))
         return render_template('group.html', photo=photo, tags=Tag.query.order_by(Tag.name).all(),
-                               used_version_ids={c.version_id for c in photo.campaigns})
+                               used_version_ids={v.id for c in photo.linked_campaigns for v in c.versions})
 
     @app.post('/library/bulk')
     def bulk_edit():
@@ -527,6 +584,7 @@ def create_app(config=None):
         if action == 'confirm_delete':
             if request.form.get('confirm') != 'delete':
                 abort(400, 'Deletion confirmation required.')
+            protect_linked_campaigns(photos)
             versions = [version for photo in photos for version in photo.versions]
             try:
                 delete_with_media(db, photos, versions, app.config['MEDIA_ROOT'])
@@ -542,6 +600,8 @@ def create_app(config=None):
                 except ValueError:
                     abort(400, 'Invalid project.')
                 if not destination_project: abort(400, 'Project no longer exists.')
+                if destination_project.id != g.project.id:
+                    protect_linked_campaigns(photos)
             target = request.form.get('state', '')
             mode = request.form.get('tag_mode', 'keep')
             if target not in ('', 'pool', 'staging', 'never_post') or mode not in ('keep', 'add', 'remove', 'replace'):
@@ -580,6 +640,7 @@ def create_app(config=None):
     @app.route('/group/<int:id>/delete', methods=['GET', 'POST'])
     def delete_group(id):
         photo = project_photo(id)
+        protect_linked_campaigns([photo])
         origin = deletion_origin()
         queue = project_photos().filter_by(state='pool').order_by(PhotoGroup.created_at, PhotoGroup.id).all()
         index = next((i for i, item in enumerate(queue) if item.id == id), 0)
@@ -607,7 +668,7 @@ def create_app(config=None):
             abort(404)
         if len(photo.versions) <= 1:
             abort(409, 'The last version can only be removed by deleting its photo group.')
-        if Campaign.query.filter_by(version_id=version.id).first():
+        if version_in_campaign(version.id):
             abort(409, 'This version is used by a campaign and cannot be deleted.')
         origin = deletion_origin()
         if request.method == 'POST':
@@ -620,39 +681,6 @@ def create_app(config=None):
             flash('Image version deleted.')
             return redirect(url_for('pool_review', id=photo.id) if origin == 'review' and photo.state == 'pool' else url_for('group', id=photo.id))
         return render_template('confirm_delete.html', photo=photo, version=version, origin=origin)
-
-    @app.route('/campaign/<int:group_id>/new', methods=['GET', 'POST'])
-    @app.route('/campaign/edit/<int:campaign_id>', methods=['GET', 'POST'])
-    def campaign(group_id=None, campaign_id=None):
-        item = db.get_or_404(Campaign, campaign_id) if campaign_id else None
-        photo = item.group if item else project_photo(group_id)
-        if photo.project_id != g.project.id: abort(404)
-        if not item and photo.state == 'never_post': abort(403, 'Move this group to Pool or Staging before creating a campaign.')
-        if request.method == 'POST':
-            version = db.session.get(PhotoVersion, request.form.get('version_id', type=int))
-            name = request.form.get('name', '').strip()
-            if not version or version.group_id != photo.id or not name: abort(400, 'A name and a version from this group are required')
-            if not item: item = Campaign(group=photo, version=version, name=name); db.session.add(item)
-            item.name = name; item.version = version
-            selected = set(request.form.getlist('accounts', type=int))
-            accounts = SocialAccount.query.filter(SocialAccount.id.in_(selected)).all()
-            if len(accounts) != len(selected): abort(400)
-            existing = {d.account_id: d for d in item.destinations}
-            for d in list(item.destinations):
-                if d.account_id not in selected: db.session.delete(d)
-            for account in accounts:
-                d = existing.get(account.id)
-                if not d: d = CampaignDestination(account=account, campaign=item); db.session.add(d)
-                status = request.form.get(f'status_{account.id}', 'planned')
-                if status not in ('planned', 'published'): abort(400)
-                d.status = status
-                date = request.form.get(f'date_{account.id}', '').strip()
-                try: d.published_at = datetime.fromisoformat(date) if date and status == 'published' else (datetime.utcnow() if status == 'published' else None)
-                except ValueError: abort(400, 'Invalid publication date')
-                d.post_url = request.form.get(f'url_{account.id}', '').strip()
-                if status == 'published': photo.state = 'final'
-            db.session.commit(); flash('Campaign saved.'); return redirect(url_for('group', id=photo.id))
-        return render_template('campaign.html', photo=photo, item=item, accounts=SocialAccount.query.order_by(SocialAccount.display_name).all())
 
     @app.route('/tags', methods=['GET', 'POST'])
     def tags():
@@ -688,7 +716,12 @@ def create_app(config=None):
             elif action == 'account':
                 name = request.form.get('display_name', '').strip(); handle = request.form.get('handle', '').strip(); platform_id = request.form.get('platform_id', type=int)
                 if not name or not handle or not platform_id: abort(400)
-                db.get_or_404(Platform, platform_id)
+                platform = db.get_or_404(Platform, platform_id)
+                if platform.name.strip().casefold() == 'reddit':
+                    try:
+                        handle = 'u/' + reddit_username(handle)
+                    except ValueError as error:
+                        abort(400, str(error))
                 obj = db.get_or_404(SocialAccount, id) if id else SocialAccount()
                 obj.display_name = name; obj.handle = handle; obj.platform_id = platform_id; obj.profile_url = request.form.get('profile_url', '').strip(); obj.active = 'active' in request.form; db.session.add(obj)
             else: abort(400)

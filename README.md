@@ -147,13 +147,10 @@ The sidebar shows the OIDC display name and uses a DiceBear Notionists avatar wi
 
 GitHub Actions tests Python 3.12 and 3.13, checks migration drift, and builds and smoke-tests the Docker image. CI needs no secrets. Keep `.env`, data, media, caches, virtual environments and editor settings private; the ignore files cover these paths.
 
-Bundled fonts retain their SIL Open Font License notices in `static/fonts/`. No application license has been selected. Choose a license before granting others redistribution or modification rights.
-
+Bundled fonts retain their SIL Open Font License notices in `static/fonts/`.
 ## Container images (GHCR)
 
 After tests and the Docker smoke test pass, pushes to `main` publish `ghcr.io/bizbazboz/frame:latest`, `:main`, and a `:sha-<commit>` tag. Version tags such as `v1.2.3` publish `:v1.2.3`, `:1.2.3`, `:1.2`, and a commit tag. `latest` follows `main`. Pull requests and other branches do not publish images. The workflow can also be run manually on `main` or a version tag.
-
-Publishing uses GitHub's built-in `GITHUB_TOKEN` with package-write permission, following the [GitHub Container Registry workflow](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images). No personal token or deployment credentials need to be stored in Actions. The package is linked to this repository through its image source label. To permit anonymous pulls, set the package's visibility to Public in GitHub package settings; otherwise authenticate Docker with an account that has package-read permission.
 
 Images include Linux amd64 and arm64 variants. Docker automatically selects the correct architecture. To use the prebuilt image, create a `compose.yml` beside your private `.env`:
 
@@ -243,4 +240,3 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-CI builds and smoke-tests the application on native amd64 and arm64 runners before publishing a [multi-platform image](https://docs.docker.com/build/ci/github-actions/multi-platform/). This validates the ARM64 container; physical Raspberry Pi hardware is not part of the CI environment.

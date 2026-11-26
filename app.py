@@ -26,6 +26,7 @@ from chunk_uploads import register_uploads
 from image_proxies import cached_proxy, VARIANTS, PREVIEW_ERRORS, PLACEHOLDER
 from reddit_analytics import register_reddit_analytics, reddit_username
 from campaigns import register_campaigns
+from photo_rotation import rotate_version, RotationError
 
 load_dotenv()
 db = SQLAlchemy()
@@ -91,6 +92,11 @@ class PhotoVersion(db.Model):
     stored_path = db.Column(db.String(500), nullable=False, unique=True)
     content_hash = db.Column(db.String(64), index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    hashes = db.relationship('PhotoVersionHash', cascade='all, delete-orphan')
+
+class PhotoVersionHash(db.Model):
+    digest = db.Column(db.String(64), primary_key=True)
+    version_id = db.Column(db.Integer, db.ForeignKey('photo_version.id'), nullable=False, index=True)
 
 class TagGroup(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -361,6 +367,9 @@ def create_app(config=None):
         fingerprint = digest(file.stream).hex()
         file.stream.seek(0)
         existing_version = PhotoVersion.query.filter_by(content_hash=fingerprint).first()
+        if not existing_version:
+            alias = db.session.get(PhotoVersionHash, fingerprint)
+            existing_version = db.session.get(PhotoVersion, alias.version_id) if alias else None
         # Backfill existing libraries once; subsequent imports use the indexed hash.
         for version in PhotoVersion.query.filter_by(content_hash=None).all():
             existing = Path(app.config['MEDIA_ROOT']) / version.stored_path
@@ -421,6 +430,25 @@ def create_app(config=None):
         except PREVIEW_ERRORS:
             app.logger.warning('Could not render preview for version %s', version.id, exc_info=True)
             return app.response_class(PLACEHOLDER, mimetype='image/svg+xml')
+
+    @app.get('/version/<int:version_id>/download')
+    def download_version(version_id):
+        version = PhotoVersion.query.join(PhotoGroup).filter(PhotoVersion.id == version_id, PhotoGroup.project_id == g.project.id).first_or_404()
+        return send_from_directory(app.config['MEDIA_ROOT'], version.stored_path, as_attachment=True, download_name=version.original_filename)
+
+    @app.post('/version/<int:version_id>/rotate')
+    def rotate_photo(version_id):
+        version = PhotoVersion.query.join(PhotoGroup).filter(PhotoVersion.id == version_id, PhotoGroup.project_id == g.project.id).first_or_404()
+        direction = request.form.get('direction')
+        if direction not in ('left', 'right'):
+            abort(400, 'Choose left or right rotation.')
+        try:
+            rotate_version(db, PhotoVersion, PhotoVersionHash, version, app.config['MEDIA_ROOT'], direction)
+        except RotationError as error:
+            abort(409, str(error))
+        flash('Image rotated.')
+        endpoint = 'pool_review' if request.values.get('origin') == 'review' and version.group.state == 'pool' else 'group'
+        return redirect(url_for(endpoint, id=version.group_id, version_id=version.id))
 
     @app.cli.command('previews-build')
     def build_previews():
@@ -540,6 +568,10 @@ def create_app(config=None):
     @app.route('/group/<int:id>', methods=['GET', 'POST'])
     def group(id):
         photo = project_photo(id)
+        selected_id = request.args.get('version_id', type=int)
+        selected_version = next((v for v in photo.versions if v.id == selected_id), None) if selected_id else (photo.versions[-1] if photo.versions else None)
+        if request.args.get('version_id') and (selected_id is None or not selected_version):
+            abort(404)
         if request.method == 'POST':
             action = request.form.get('action')
             if action == 'state':
@@ -556,7 +588,7 @@ def create_app(config=None):
                 except ValueError as e: flash(str(e))
             else: abort(400)
             commit_uploads(); return redirect(url_for('group', id=id))
-        return render_template('group.html', photo=photo, tags=Tag.query.order_by(Tag.name).all(),
+        return render_template('group.html', photo=photo, selected_version=selected_version, tags=Tag.query.order_by(Tag.name).all(),
                                used_version_ids={v.id for c in photo.linked_campaigns for v in c.versions})
 
     @app.post('/library/bulk')

@@ -18,6 +18,11 @@ document.addEventListener('click', event => {
 });
 document.querySelectorAll('[data-preview]').forEach(button => button.addEventListener('click', () => {
   const preview = document.querySelector('#version-preview'); preview.src = button.dataset.preview; preview.alt = button.dataset.alt;
+  const rotation = document.querySelector('[data-workspace-rotate]');
+  const download = document.querySelector('[data-workspace-download]');
+  if (rotation) rotation.action = button.dataset.rotateUrl;
+  if (download) download.href = button.dataset.downloadUrl;
+  if (button.dataset.workspaceUrl) history.replaceState(history.state, '', button.dataset.workspaceUrl);
   const caption = document.querySelector('[data-preview-label]'); if (caption) caption.textContent = button.dataset.label || button.textContent.trim();
   document.querySelectorAll('[data-preview]').forEach(tile => { const selected = tile === button; tile.classList.toggle('selected', selected); tile.setAttribute('aria-pressed', selected); });
 }));
@@ -111,7 +116,7 @@ if (reviewForm) {
   reviewForm.addEventListener('submit', event => {
     if (reviewForm.classList.contains('is-submitting')) { event.preventDefault(); return; }
     const action = document.createElement('input');
-    action.type = 'hidden'; action.name = 'action'; action.value = event.submitter?.value || 'save';
+    action.type = 'hidden'; action.name = event.submitter?.name || 'action'; action.value = event.submitter?.value || 'save';
     action.dataset.reviewAction = '';
     reviewForm.append(action);
     reviewForm.querySelectorAll('button[type="submit"]:not(:disabled)').forEach(button => { button.dataset.reviewBusy = ''; button.disabled = true; });

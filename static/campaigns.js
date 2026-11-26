@@ -113,7 +113,9 @@ if (campaignImages) {
       const selected = row.querySelector('select').selectedOptions[0];
       const thumb = row.querySelector('img');
       thumb.hidden = !selected?.value;
-      if (selected?.value) thumb.src = selected.dataset.thumb;
+      const workspace = row.querySelector('[data-campaign-image-workspace]');
+      workspace.hidden = !selected?.value;
+      if (selected?.value) { thumb.src = selected.dataset.thumb; workspace.href = selected.dataset.workspace; }
     });
     const selectedIds = rows.map(row => row.querySelector('select').value).filter(Boolean);
     rows.forEach(row => {
@@ -123,11 +125,13 @@ if (campaignImages) {
       select.setCustomValidity('');
       input.setCustomValidity(duplicate ? 'Choose each image only once.' : (!select.value && input.value ? 'Choose an image from the results.' : ''));
     });
-    if (!rows.length) { preview.hidden = true; preview.removeAttribute('src'); }
+    if (!rows.length) { preview.hidden = true; preview.removeAttribute('src'); document.querySelector('[data-campaign-preview-workspace]').hidden = true; }
   };
   const show = row => {
     const selected = row.querySelector('select').selectedOptions[0];
-    if (selected?.value) { preview.src = selected.dataset.full; preview.hidden = false; }
+    const workspace = document.querySelector('[data-campaign-preview-workspace]');
+    workspace.hidden = !selected?.value;
+    if (selected?.value) { preview.src = selected.dataset.full; preview.hidden = false; workspace.href = selected.dataset.workspace; }
   };
   campaignImages.addEventListener('change', event => { update(); show(event.target.closest('[data-campaign-image]')); });
   campaignImages.addEventListener('click', event => {

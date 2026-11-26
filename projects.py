@@ -3,7 +3,7 @@ from flask import abort, g, redirect, render_template, request, session, url_for
 from sqlalchemy import func
 
 PUBLIC_ENDPOINTS = {'static', 'manifest', 'service_worker', 'login', 'callback', 'logout'}
-CONTEXT_ENDPOINTS = {'campaigns', 'delete_campaign', 'reddit_analytics', 'reddit_sync', 'dashboard', 'import_photos', 'media', 'image_preview', 'gallery', 'pool_review', 'group',
+CONTEXT_ENDPOINTS = {'rotate_photo', 'download_version', 'campaigns', 'delete_campaign', 'reddit_analytics', 'reddit_sync', 'dashboard', 'import_photos', 'media', 'image_preview', 'gallery', 'pool_review', 'group',
                     'bulk_edit', 'delete_group', 'delete_version', 'campaign', 'tags', 'accounts', 'projects', 'inspiration', 'delete_inspiration', 'upload_start', 'upload_status', 'upload_chunk', 'upload_finish', 'upload_cancel'}
 
 

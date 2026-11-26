@@ -198,6 +198,14 @@ These are archive snapshots, not live Reddit insights. Archive coverage can be i
 
 Apply the included Alembic migration before running this version (`flask --app app db upgrade`; Docker startup already runs migrations). This feature does not deploy itself or publish anything.
 
+## Photo rotation and downloads
+
+Photo workspaces and Pool review offer **Rotate left**, **Rotate right**, and **Download** controls for the displayed version. Rotation applies 90 degrees to the upright image and physically rewrites its managed file at the same path in the media mount. Other versions are unchanged. EXIF orientation is normalized; supported EXIF, colour profiles and resolution metadata are retained. JPEG and AVIF files are re-encoded. Animated files are left unchanged rather than flattened.
+
+Previews and metadata/histograms refresh after rotation. The current file hash is updated, and previous hashes remain linked to the version so importing either the pre-rotation file or the current file is still rejected as a duplicate. If saving the file or committing its database change fails, the previous source bytes are restored. Migration `0007` adds this hash history.
+
+Campaign thumbnails and editor previews open the exact selected image version in its photo workspace. Gallery photos and Pool review images also link to the workspace. Downloads return the managed source file as an attachment with its original filename, including any physical rotations you have applied.
+
 ## Optimized image previews
 
 Gallery thumbnails use WebP proxies up to 640 pixels and 100 KB. Photo workspaces, Pool review, and campaign previews use proxies up to 2400 pixels and 500 KB. Quality and dimensions adapt to stay within these byte budgets. Originals remain untouched and can be downloaded from the version list; metadata and histograms still use originals.
